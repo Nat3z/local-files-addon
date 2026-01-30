@@ -1,0 +1,13 @@
+{
+  "name": "local-files",
+  "module": "main.ts",
+  "type": "module",
+  "dependencies": {
+    "genesis-lib": "^0.0.3",
+    "ogi-addon": "^2.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.1.0",
+    "typescript": "^5.9.3"
+  }
+}
