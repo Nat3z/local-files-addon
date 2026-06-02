@@ -176,3 +176,12 @@ dist
 
 # OGI Addon
 *.log
+
+# Local PEM key material (never commit private keys)
+keys/*.pem
+
+# Commit public keys only for the users to upload
+!keys/*.public.pem
+
+# Output of the encrypt.ts script
+output/
