@@ -1,14 +1,28 @@
 import OGIAddon, { ConfigurationBuilder } from "ogi-addon";
 import fs from "fs";
 import { join } from "path";
-import { spawn, spawnSync, execFile } from "child_process";
-import { promisify } from "util";
+import { spawnSync } from "child_process";
 import { dirname } from "path";
 import os from "os";
 import clipboard from "clipboardy";
 import { encryptFile } from "./encrypt";
 
-const execFileAsync = promisify(execFile);
+const VALID_REDISTRIBUTABLES = [
+  "dotnet40",
+  "dotnet48",
+  "xna40",
+  "vcrun2022",
+] as const;
+const SELECTED_REDISTRIBUTABLE_PREFIX = "✔︎ ";
+
+type Redistributable = (typeof VALID_REDISTRIBUTABLES)[number];
+
+function parseRedistributableChoice(choice: string): Redistributable | null {
+  const name = choice.startsWith(SELECTED_REDISTRIBUTABLE_PREFIX)
+    ? choice.slice(SELECTED_REDISTRIBUTABLE_PREFIX.length)
+    : choice;
+  return VALID_REDISTRIBUTABLES.find((candidate) => candidate === name) ?? null;
+}
 
 /** Supports log stems like `2026-04-22T19-14-33-512Z` and `2026-04-23T01_26_52.851Z` (UTC). */
 function logFilenameToUtcDate(filename: string): Date | null {
@@ -164,9 +178,91 @@ addon.on("setup", async ({ path, appID }, event) => {
     return;
   }
 
+  const selectedRedistributables = new Set<Redistributable>();
+  if (process.platform === "linux") {
+    while (true) {
+      const redistributableChoices = VALID_REDISTRIBUTABLES.map((name) =>
+        selectedRedistributables.has(name)
+          ? `${SELECTED_REDISTRIBUTABLE_PREFIX}${name}`
+          : name,
+      );
+      const { redistSelected, isDone } = await event.askForInput(
+        "Choose Winetricks Verbs",
+        "Select a verb to toggle, or press Done to continue.",
+        new ConfigurationBuilder()
+          .addStringOption((option) =>
+            option
+              .setName("redistSelected")
+              .setDisplayName("Verb")
+              .setDescription("Choose a redistributable to toggle.")
+              .setInputType("text")
+              .setAllowedValues(redistributableChoices)
+              .setDefaultValue(redistributableChoices[0]),
+          )
+          .addActionOption((option) =>
+            option
+              .setName("isDone")
+              .setDisplayName("Done")
+              .setDescription("Continue with the selected redistributables.")
+              .setButtonText("Done"),
+          ),
+      );
+
+      if (isDone) {
+        const selection = VALID_REDISTRIBUTABLES.filter((name) =>
+          selectedRedistributables.has(name),
+        );
+        const { ready } = await event.askForInput(
+          "Confirm Redistributables",
+          selection.length > 0
+            ? `Install these Winetricks verbs: ${selection.join(", ")}`
+            : "Continue without installing any Winetricks verbs?",
+          new ConfigurationBuilder()
+            .addActionOption((option) =>
+              option
+                .setName("ready")
+                .setDisplayName("Confirm")
+                .setDescription("Confirm the selected redistributables.")
+                .setButtonText("Confirm"),
+            )
+            .addActionOption((option) =>
+              option
+                .setName("notReady")
+                .setDisplayName("Go Back")
+                .setDescription("Return to redistributable selection.")
+                .setButtonText("Go Back"),
+            ),
+        );
+        if (ready) break;
+        continue;
+      }
+
+      const redistributable = parseRedistributableChoice(redistSelected);
+      if (!redistributable) {
+        event.fail("Invalid redistributable selected.");
+        return;
+      }
+      if (selectedRedistributables.has(redistributable)) {
+        selectedRedistributables.delete(redistributable);
+      } else {
+        selectedRedistributables.add(redistributable);
+      }
+    }
+  }
+
+  const redistributables = VALID_REDISTRIBUTABLES.filter((name) =>
+    selectedRedistributables.has(name),
+  );
+
   event.resolve({
     cwd: workingDirectory,
     launchExecutable: executable,
+    ...(redistributables.length > 0 && {
+      redistributables: redistributables.map((name) => ({
+        name,
+        path: "winetricks",
+      })),
+    }),
     version: "localfiles-ver",
   });
 });
